@@ -419,6 +419,7 @@ footer p{font-size:.75rem;color:#AFA79B;letter-spacing:.04em}
     <p class="overlay-book-author" id="overlayAuthor"></p>
     <div class="excerpts-label overlay-summary-label">Motivation for Reading &amp; Implementing the Book</div>
     <div class="overlay-summary" id="overlaySummary"></div>
+    <div class="excerpts-label overlay-summary-label" id="bookChapterHeading" style="display:none;margin-top:.5rem">Table of Contents</div>
     <div class="dd-topic-list" id="bookChapterNav" style="display:none;margin:1rem 0"></div>
     <button class="overlay-takeaways-btn" id="overlayTakeawaysBtn" onclick="openTakeaways()" style="display:none">My Personal Takeaways &rarr;</button>
     <div class="excerpts-section" id="excerptsSection">
@@ -491,7 +492,6 @@ function getLoveNeighborsTakeaways(){
 return `
 <span class="takeaways-tag">Love Your Neighbors</span>
 <h1 class="takeaways-title">Loving Your Neighbors Well</h1>
-<p class="takeaways-author">Comprehensive Takeaways from How to Win Friends and Influence People, Find Your People, and The Art of Neighboring</p>
 
 <div class="dd-topic-list" style="margin-top:1.5rem">
 <a class="dd-topic-link" onclick="var el=document.getElementById('tk-circles');var c=document.getElementById('takeawaysOverlay');c.scrollTo({top:el.offsetTop-60,behavior:'smooth'})">Building My Inner Circles</a>
@@ -1997,13 +1997,14 @@ function normalizeChapterLabel(text){
 }
 
 function buildExcerptNav(navEl,contentEl,bookTitle){
+  navEl.className='dd-topic-list';
   navEl.style.display='none';
   navEl.innerHTML='';
 
   const headings=[].slice.call(contentEl.querySelectorAll('.excerpt-section-title, .excerpt-principle'))
     .filter(function(h){return h.textContent && h.textContent.trim().length>0;});
 
-  if(headings.length<=1) return;
+  if(headings.length<=1) return false;
 
   function addNavButton(label,heading){
     const a=document.createElement('a');
@@ -2124,7 +2125,7 @@ function buildExcerptNav(navEl,contentEl,bookTitle){
     });
 
     if(navEl.childElementCount>0) navEl.style.display='block';
-    return;
+    return navEl.childElementCount>0;
   }
 
   headings.slice(1).forEach(function(heading){
@@ -2134,16 +2135,23 @@ function buildExcerptNav(navEl,contentEl,bookTitle){
   });
 
   if(navEl.childElementCount>0) navEl.style.display='flex';
+  return navEl.childElementCount>0;
 }
 /* HEALTH MARKDOWN HELPERS END */
 
 
 let currentBook=null;
 function scrollTo(id){const e=document.getElementById('pillar-'+id);if(e)window.scrollTo({top:e.getBoundingClientRect().top+window.scrollY-80,behavior:'smooth'})}
+function slugifyTag(text){
+  return (text||'')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g,'-')
+    .replace(/^-+|-+$/g,'');
+}
 
 function openBook(el){
   const t=el.dataset.title,a=el.dataset.author,tag=el.dataset.tag,c=B[t];
-  const shareTakeaways=el.dataset.shareTakeaways||null;
+  const shareTakeaways=el.dataset.shareTakeaways||slugifyTag(tag);
   const markdownExcerpt=HEALTH_MARKDOWN_EXCERPTS[t]||'';
   const hasMarkdownExcerpt=markdownExcerpt.trim().length>0;
 
@@ -2153,7 +2161,9 @@ function openBook(el){
   document.getElementById('overlayAuthor').textContent='By '+a;
 
   const s=document.getElementById('overlaySummary'),tb=document.getElementById('overlayTakeawaysBtn'),fb=document.getElementById('overlayFullBody'),es=document.getElementById('excerptsSection');
+  const ch=document.getElementById('bookChapterHeading');
   const cn=document.getElementById('bookChapterNav');
+  ch.style.display='none';
   cn.style.display='none';
   cn.innerHTML='';
 
@@ -2164,7 +2174,7 @@ function openBook(el){
       s.innerHTML='<p>Expanded notes are available in the excerpts section below.</p>';
     }
 
-    tb.style.display=(shareTakeaways==='love-neighbors')?'inline-flex':'none';
+    tb.style.display='inline-flex';
 
     if(t==="How to Win Friends and Influence People"){es.style.display='block';fb.innerHTML=window._htwExcerpts||'';
     }else if(t==="7 Principles for Making Marriage Work"){es.style.display='block';fb.innerHTML=window._7principlesExcerpts||'';
@@ -2179,10 +2189,13 @@ function openBook(el){
       es.style.display='none';
     }
 
-    if(es.style.display==='block') buildExcerptNav(cn,fb,t);
+    if(es.style.display==='block'){
+      const hasToc=buildExcerptNav(cn,fb,t);
+      ch.style.display=hasToc?'flex':'none';
+    }
   }else{
     s.innerHTML='<div class="overlay-coming-soon">Summary coming soon — content will be added once provided.</div>';
-    tb.style.display='none';
+    tb.style.display='inline-flex';
     es.style.display='none';
   }
 
@@ -2192,11 +2205,51 @@ function openBook(el){
 
 function closeBook(){document.getElementById('bookOverlay').classList.remove('active');document.body.style.overflow=''}
 
+function getSectionTakeaways(sectionKey,sectionTag){
+  const books=[].slice.call(document.querySelectorAll('.book')).filter(function(b){
+    const key=b.dataset.shareTakeaways||slugifyTag(b.dataset.tag||'');
+    return key===sectionKey;
+  }).map(function(b){
+    return {
+      title:b.dataset.title||'',
+      author:b.dataset.author||'',
+      id:'tk-'+slugifyTag(b.dataset.title||'')
+    };
+  });
+
+  const seen={};
+  const uniqBooks=books.filter(function(b){
+    if(!b.title || seen[b.title]) return false;
+    seen[b.title]=true;
+    return true;
+  });
+
+  const toc=uniqBooks.map(function(b){
+    return `<a class="dd-topic-link" onclick="var el=document.getElementById('${b.id}');var c=document.getElementById('takeawaysOverlay');c.scrollTo({top:el.offsetTop-60,behavior:'smooth'})">${escapeHtml(b.title)}</a>`;
+  }).join('');
+
+  const sections=uniqBooks.map(function(b){
+    const summary=(B[b.title]&&B[b.title].s&&B[b.title].s.length)?B[b.title].s:[];
+    const summaryHtml=summary.length
+      ? summary.map(function(p){return `<div class="dd-item">${escapeHtml(p)}</div>`;}).join('')
+      : '<div class="dd-item">Takeaways are coming soon for this book. Add your personal notes here as you build it out.</div>';
+    return `<div class="dd-category" id="${b.id}"><div class="dd-category-title">${escapeHtml(b.title)}</div>${summaryHtml}</div>`;
+  }).join('');
+
+  return `
+<span class="takeaways-tag">${escapeHtml(sectionTag||'')}</span>
+<h1 class="takeaways-title">${escapeHtml(sectionTag||'')} — Personal Takeaways</h1>
+<div class="dd-topic-list" style="margin-top:1.5rem">${toc}</div>
+${sections}`;
+}
+
 function openTakeaways(){
   if(!currentBook) return;
   const tc=document.getElementById('takeawaysContent');
   if(currentBook.shareTakeaways==='love-neighbors'){
     tc.innerHTML=getLoveNeighborsTakeaways();
+  }else{
+    tc.innerHTML=getSectionTakeaways(currentBook.shareTakeaways,currentBook.tag);
   }
   document.getElementById('takeawaysOverlay').classList.add('active');
 }
