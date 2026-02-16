@@ -2142,6 +2142,9 @@ function buildExcerptNav(navEl,contentEl,bookTitle){
 
 
 let currentBook=null;
+let currentDeepDiveType=null;
+let isRoutingUpdate=false;
+
 function scrollTo(id){const e=document.getElementById('pillar-'+id);if(e)window.scrollTo({top:e.getBoundingClientRect().top+window.scrollY-80,behavior:'smooth'})}
 function slugifyTag(text){
   return (text||'')
@@ -2149,10 +2152,62 @@ function slugifyTag(text){
     .replace(/[^a-z0-9]+/g,'-')
     .replace(/^-+|-+$/g,'');
 }
+function getBookSlug(title){return slugifyTag(title||'')}
+function getSectionKeyFromBookEl(el){return (el.dataset.shareTakeaways||slugifyTag(el.dataset.tag||''))}
+function getSectionTagFromKey(key){
+  const el=[].slice.call(document.querySelectorAll('.book')).find(function(b){
+    return getSectionKeyFromBookEl(b)===key;
+  });
+  return el?el.dataset.tag:'';
+}
+function findBookElBySlug(slug){
+  return [].slice.call(document.querySelectorAll('.book')).find(function(b){
+    return getBookSlug(b.dataset.title)===slug;
+  })||null;
+}
+function buildBookRoute(book){return `book/${getBookSlug(book.title)}`}
+function buildTakeawaysRoute(book,key){return `${buildBookRoute(book)}/takeaways/${key||book.shareTakeaways}`}
+function buildDeepDiveRoute(book,key,type){return `${buildTakeawaysRoute(book,key)}/deep-dive/${type}`}
+function setRouteHash(route){
+  const next=route?`#${route}`:'';
+  if(window.location.hash===next) return;
+  isRoutingUpdate=true;
+  if(route){
+    window.location.hash=route;
+  }else{
+    window.location.hash='';
+  }
+  setTimeout(function(){isRoutingUpdate=false;},0);
+}
+function hideAllOverlays(){
+  document.getElementById('deepDiveOverlay').classList.remove('active');
+  document.getElementById('takeawaysOverlay').classList.remove('active');
+  document.getElementById('bookOverlay').classList.remove('active');
+  document.body.style.overflow='';
+}
+function parseRouteHash(){
+  const hash=window.location.hash.replace(/^#/,'');
+  if(!hash) return {type:'home'};
+  const parts=hash.split('/').filter(Boolean).map(function(p){return decodeURIComponent(p);});
+  if(parts[0]!=='book' || !parts[1]) return {type:'home'};
 
-function openBook(el){
+  const out={type:'book',bookSlug:parts[1],takeawaysKey:'',deepDiveType:''};
+  if(parts[2]==='takeaways'){
+    out.type='takeaways';
+    out.takeawaysKey=parts[3]||'';
+    if(parts[4]==='deep-dive' && parts[5]){
+      out.type='deep-dive';
+      out.deepDiveType=parts[5];
+    }
+  }
+  return out;
+}
+
+function openBook(el,opts){
+  opts=opts||{};
+  if(!el) return;
   const t=el.dataset.title,a=el.dataset.author,tag=el.dataset.tag,c=B[t];
-  const shareTakeaways=el.dataset.shareTakeaways||slugifyTag(tag);
+  const shareTakeaways=getSectionKeyFromBookEl(el);
   const markdownExcerpt=HEALTH_MARKDOWN_EXCERPTS[t]||'';
   const hasMarkdownExcerpt=markdownExcerpt.trim().length>0;
 
@@ -2170,7 +2225,7 @@ function openBook(el){
 
   if(c||hasMarkdownExcerpt){
     if(c){
-      s.innerHTML=c.s.map(p=>'<p>'+p+'</p>').join(' ');
+      s.innerHTML=c.s.map(function(p){return '<p>'+p+'</p>';}).join(' ');
     }else{
       s.innerHTML='<p>Expanded notes are available in the excerpts section below.</p>';
     }
@@ -2200,15 +2255,21 @@ function openBook(el){
     es.style.display='none';
   }
 
-  document.getElementById('bookOverlay').classList.add('active');document.body.style.overflow='hidden';
+  document.getElementById('bookOverlay').classList.add('active');
+  document.body.style.overflow='hidden';
+  if(opts.updateRoute!==false) setRouteHash(buildBookRoute(currentBook));
 }
 
-
-function closeBook(){document.getElementById('bookOverlay').classList.remove('active');document.body.style.overflow=''}
+function closeBook(opts){
+  opts=opts||{};
+  hideAllOverlays();
+  currentDeepDiveType=null;
+  if(opts.updateRoute!==false) setRouteHash('');
+}
 
 function getSectionTakeaways(sectionKey,sectionTag){
   const books=[].slice.call(document.querySelectorAll('.book')).filter(function(b){
-    const key=b.dataset.shareTakeaways||slugifyTag(b.dataset.tag||'');
+    const key=getSectionKeyFromBookEl(b);
     return key===sectionKey;
   }).map(function(b){
     return {
@@ -2244,20 +2305,31 @@ function getSectionTakeaways(sectionKey,sectionTag){
 ${sections}`;
 }
 
-function openTakeaways(){
+function openTakeaways(opts){
+  opts=opts||{};
   if(!currentBook) return;
+  const key=opts.forceKey||currentBook.shareTakeaways;
+  const sectionTag=getSectionTagFromKey(key)||currentBook.tag;
   const tc=document.getElementById('takeawaysContent');
-  if(currentBook.shareTakeaways==='love-neighbors'){
+  if(key==='love-neighbors'){
     tc.innerHTML=getLoveNeighborsTakeaways();
   }else{
-    tc.innerHTML=getSectionTakeaways(currentBook.shareTakeaways,currentBook.tag);
+    tc.innerHTML=getSectionTakeaways(key,sectionTag);
   }
   document.getElementById('takeawaysOverlay').classList.add('active');
+  if(opts.updateRoute!==false) setRouteHash(buildTakeawaysRoute(currentBook,key));
 }
 
-function closeTakeaways(){document.getElementById('takeawaysOverlay').classList.remove('active')}
-function closeAll(){document.getElementById('takeawaysOverlay').classList.remove('active');document.getElementById('bookOverlay').classList.remove('active');document.body.style.overflow=''}
-function openDeepDive(type){
+function closeTakeaways(opts){
+  opts=opts||{};
+  document.getElementById('deepDiveOverlay').classList.remove('active');
+  document.getElementById('takeawaysOverlay').classList.remove('active');
+  currentDeepDiveType=null;
+  if(opts.updateRoute!==false && currentBook) setRouteHash(buildBookRoute(currentBook));
+}
+function closeAll(){closeBook()}
+function openDeepDive(type,opts){
+  opts=opts||{};
   const tc=document.getElementById('deepDiveContent');
   if(type==='compliments') tc.innerHTML=getComplimentsPage();
   else if(type==='texts') tc.innerHTML=getTextsPage();
@@ -2270,9 +2342,50 @@ function openDeepDive(type){
   else if(type==='questions') tc.innerHTML=getQuestionsPage();
   document.getElementById('deepDiveOverlay').classList.add('active');
   document.getElementById('deepDiveOverlay').scrollTop=0;
+  currentDeepDiveType=type;
+  if(opts.updateRoute!==false && currentBook){
+    setRouteHash(buildDeepDiveRoute(currentBook,currentBook.shareTakeaways,type));
+  }
 }
-function closeDeepDive(){document.getElementById('deepDiveOverlay').classList.remove('active')}
-function closeAllDeep(){document.getElementById('deepDiveOverlay').classList.remove('active');document.getElementById('takeawaysOverlay').classList.remove('active');document.getElementById('bookOverlay').classList.remove('active');document.body.style.overflow=''}
+function closeDeepDive(opts){
+  opts=opts||{};
+  document.getElementById('deepDiveOverlay').classList.remove('active');
+  currentDeepDiveType=null;
+  if(opts.updateRoute!==false && currentBook){
+    setRouteHash(buildTakeawaysRoute(currentBook,currentBook.shareTakeaways));
+  }
+}
+function closeAllDeep(){closeBook()}
+function syncRouteFromHash(){
+  if(isRoutingUpdate) return;
+  const route=parseRouteHash();
+  if(route.type==='home'){
+    hideAllOverlays();
+    currentDeepDiveType=null;
+    return;
+  }
+
+  const bookEl=findBookElBySlug(route.bookSlug);
+  if(!bookEl){
+    hideAllOverlays();
+    return;
+  }
+
+  hideAllOverlays();
+  openBook(bookEl,{updateRoute:false});
+
+  if(route.type==='takeaways' || route.type==='deep-dive'){
+    const forcedKey=route.takeawaysKey||currentBook.shareTakeaways;
+    openTakeaways({updateRoute:false,forceKey:forcedKey});
+  }
+  if(route.type==='deep-dive' && route.deepDiveType){
+    openDeepDive(route.deepDiveType,{updateRoute:false});
+  }
+}
+
+window.addEventListener('hashchange',syncRouteFromHash);
+syncRouteFromHash();
+
 document.addEventListener('keydown',e=>{if(e.key==='Escape'){if(document.getElementById('deepDiveOverlay').classList.contains('active'))closeDeepDive();else if(document.getElementById('takeawaysOverlay').classList.contains('active'))closeTakeaways();else closeBook()}});
 document.getElementById('bookOverlay').addEventListener('click',function(e){if(e.target===this)closeBook()});
 document.getElementById('takeawaysOverlay').addEventListener('click',function(e){if(e.target===this)closeTakeaways()});
